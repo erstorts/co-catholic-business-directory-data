@@ -4,6 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+sentence-transformers = "*"
+hdbscan = "*"
+umap-learn = "*"
+plotly = "*"
+scikit-learn = "*"
+pandas = "*"
+nbformat = "*"
+openai = "*"
+tiktoken = "*"
+dotenv = "*"
 
 [dev-packages]
 ipykernel = "*"
