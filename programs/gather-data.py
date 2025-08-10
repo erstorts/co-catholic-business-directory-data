@@ -28,10 +28,6 @@ for file in data_files:
 # Combine all dataframes
 if dfs:
     df = pd.concat(dfs, ignore_index=True)
-    
-    # Convert timestamp column to datetime
-    #df['originalTimestamp'] = pd.to_datetime(df['originalTimestamp'])
-    
     # Get the latest date
     latest_date = df['originalTimestamp'].max()
     print(f"Latest date in data: {latest_date}")
