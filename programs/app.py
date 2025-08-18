@@ -16,10 +16,18 @@ import os
 load_dotenv()
 
 df = pd.DataFrame()
+
+try:
+    data_folder = 'data'
+    data_folder_list = os.listdir(data_folder)
+except:
+    data_folder = '../data'
+    data_folder_list = os.listdir('../data')
+
 # import data
-for file in os.listdir('data'):
+for file in data_folder_list:
     if file.endswith('.csv'):
-        loop_df = pd.read_csv(f'data/{file}')
+        loop_df = pd.read_csv(f'{data_folder}/{file}')
         df = pd.concat([df, loop_df])
 
 print(f'Total rows in full dataframe: {df.shape[0]}')
@@ -218,6 +226,42 @@ order by month_year
 """
 signups = duckdb.sql(query).df()
 
+query = """
+WITH page_sequence AS (
+    SELECT 
+        DATE_TRUNC('week', DATE(originalTimestamp)) as the_week,
+        COALESCE(userId, anonymousId) as user_id,
+        name as current_page,
+        LEAD(name) OVER (
+            PARTITION BY COALESCE(userId, anonymousId) 
+            ORDER BY originalTimestamp
+        ) as next_page,
+        originalTimestamp
+    FROM df
+    WHERE event_type = 'page'
+    AND name IN ('search', 'business_profile')
+),
+user_weekly_views AS (
+    SELECT 
+        the_week,
+        user_id,
+        COUNT(CASE WHEN current_page = 'search' THEN 1 END) as user_search_views,
+        COUNT(CASE WHEN current_page = 'business_profile' THEN 1 END) as user_profile_views,
+        COUNT(CASE WHEN current_page = 'search' AND next_page = 'business_profile' THEN 1 END)::FLOAT / 
+            NULLIF(COUNT(CASE WHEN current_page = 'search' THEN 1 END), 0) as user_ctr
+    FROM page_sequence
+    GROUP BY the_week, user_id
+)
+SELECT 
+    the_week as the_date,
+    AVG(user_search_views) as search_views,
+    AVG(user_profile_views) as profile_views,
+    AVG(user_ctr) as click_through_rate
+FROM user_weekly_views
+GROUP BY the_week
+ORDER BY the_week
+"""
+ctr = duckdb.sql(query).df()
 
 
 
@@ -335,8 +379,8 @@ with st.container():
 st.divider()
 st.header('User Behavior')
 with st.container():
-    st.subheader('Average Number of Searches per User')
-    st.line_chart(search_results, x='the_date', y='avg_business_count', x_label='Date', y_label='Average Number of Searches per User')
+    st.subheader('Average Number of Searches Results per User')
+    st.line_chart(search_results, x='the_date', y='avg_business_count', x_label='Date', y_label='Average Number of Searches Results per User')
 
 with st.container():
     st.subheader('Average Number of Impressions per Business')
@@ -353,6 +397,10 @@ with st.container():
 with st.container():
     st.subheader('Daily Signups')
     st.line_chart(signups, x='month_year', y='signups', x_label='Month', y_label='Signups')
+
+with st.container():
+    st.subheader('Search to Profile Click Through Rate')
+    st.line_chart(ctr, x='the_date', y='click_through_rate', x_label='Date', y_label='Search to Profile Click Through Rate')
 
 
 

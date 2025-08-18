@@ -12,7 +12,6 @@ verify_ssl = true
 torch = {version = "==2.4.1", index = "pytorch-cpu"}
 transformers = "==4.44.2"
 sentence-transformers = "==3.0.1"
-
 hdbscan = "*"
 umap-learn = "*"
 plotly = "*"
@@ -23,7 +22,7 @@ openai = "*"
 tiktoken = "*"
 python-dotenv = "*"   # rename: package is python-dotenv
 duckdb = "*"
-streamlit = "*"       # optional but nice to pin later
+streamlit = "*"
 
 [dev-packages]
 ipykernel = "*"
