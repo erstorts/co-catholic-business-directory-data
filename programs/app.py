@@ -75,18 +75,19 @@ with base as (
     ORDER BY 1, 2
 )
 
-, rev_calc as (
 select *,
 case when subscription_plan = 'monthly' then num_customers*20 else num_customers*200 end as revenue
 from base
-)
+"""
+rev_calc = duckdb.sql(query).df()
 
+query = """
 select renew_date,
 sum(revenue) as estimated_revenue
 from rev_calc
 group by 1
 order by 1
-    """
+"""
 sub_date = duckdb.sql(query).df()
 
 
@@ -440,6 +441,8 @@ st.scatter_chart(search_counts, x='x', y='y', color='kmeans_name', x_label='UMAP
 
 st.divider()
 st.header('Revenue Forecast')
+st.bar_chart(rev_calc, x='renew_date', y='num_customers', color='subscription_plan', x_label='Renew Date', y_label='Number of Paid Customers')
+
 st.write('This is a bar chart of the estimated revenue by renew date.')
 st.bar_chart(sub_date, x='renew_date', y='estimated_revenue', x_label='Renew Date', y_label='Estimated Revenue')
 
@@ -447,7 +450,7 @@ st.bar_chart(sub_date, x='renew_date', y='estimated_revenue', x_label='Renew Dat
 def convert_for_download(df):
     return df.to_csv().encode("utf-8")
 
-csv = convert_for_download(sub_date)
+csv = convert_for_download(rev_calc)
 
 st.write('You can download the data for the forecast by clicking the button below.')
 st.download_button(
