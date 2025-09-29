@@ -27,7 +27,7 @@ except:
 
 
 # import data
-bill_df = pd.read_csv('../user-data.csv')
+bill_df = pd.read_csv('user-data.csv')
 
 
 for file in data_folder_list:
