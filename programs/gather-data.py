@@ -14,7 +14,7 @@ bucket_name = 'colorado-catholic-buisness-directory'
 print('Getting list of all CSV files in data folder')
 # Get list of all CSV files in data folder
 data_files = []
-data_folder = 'data'  # Data folder relative to project root
+data_folder = 'event-data'  # Data folder relative to project root
 for file in os.listdir(data_folder):
     if file.endswith('.csv'):
         data_files.append(os.path.join(data_folder, file))
@@ -113,7 +113,7 @@ print(f'Total rows in full dataframe: {full_df.shape[0]}')
 
 # Get current datetime for filename
 current_time = pd.Timestamp.now().strftime('%Y-%m-%d')
-filename = f'data/ccbd-{current_time}.csv'
+filename = f'event-data/ccbd-{current_time}.csv'
 
 full_df.to_csv(filename, index=False)
 print(f'Saved full dataframe to {filename}')
