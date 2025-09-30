@@ -28,7 +28,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ccbd-*.csv
+          git add event-data/ccbd-*.csv
           git commit -m "Update data: $(date -u +"%Y-%m-%d")"
           git push
     
