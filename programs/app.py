@@ -2,9 +2,10 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import duckdb
-from datetime import datetime
+from datetime import datetime, timedelta
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
+from streamlit.proto import ButtonGroup_pb2
 import umap
 from openai import OpenAI
 from collections import defaultdict
@@ -15,127 +16,164 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
-df = pd.DataFrame()
+st.set_page_config(layout="wide")
 
 try:
-    data_folder = 'event-data'
+    bill_df = pd.read_csv('user-data.csv')
+except:
+    bill_df = pd.read_csv('../user-data.csv')
+
+bill_df.rename(columns={'unique id': 'userId', 'Subscription Plan': 'subscription_plan', 'Subscription Renew Date': 'renew_date'}, inplace=True)
+
+event_df = pd.DataFrame()
+
+try:
+    data_folder = f'event-data'
     data_folder_list = os.listdir(data_folder)
 except:
     data_folder = '../event-data'
-    data_folder_list = os.listdir(data_folder)
-
-
+    data_folder_list = os.listdir('../event-data')
 
 # import data
-bill_df = pd.read_csv('user-data.csv')
-
-
 for file in data_folder_list:
     if file.endswith('.csv'):
         loop_df = pd.read_csv(f'{data_folder}/{file}')
-        df = pd.concat([df, loop_df])
+        event_df = pd.concat([event_df, loop_df])
 
-print(f'Total rows in full dataframe: {df.shape[0]}')
-# only allow data from 2025-01-01 forward
-df = df[df['originalTimestamp'] >= '2025-01-01']
-
+event_df = event_df[event_df['originalTimestamp'] >= '2025-01-01']
+df = event_df.merge(bill_df, on='userId', how='left')
 
 
 # sidebar menu
-min_date = datetime.strptime(df['originalTimestamp'].min().split()[0], '%Y-%m-%d')
-max_date = datetime.strptime(df['originalTimestamp'].max().split()[0], '%Y-%m-%d')
+data_min_date = datetime.strptime(df['originalTimestamp'].min().split()[0], '%Y-%m-%d')
+data_max_date = datetime.strptime(df['originalTimestamp'].max().split()[0], '%Y-%m-%d')
 
-date_range = st.sidebar.slider(
-    "Date Range Selector",
-    value=(min_date, max_date),
-    format="YYYY-MM-DD"
+st.sidebar.button("Reset", type="primary")
+
+st.sidebar.header("Date Selectors")
+st.sidebar.write("Quick Selectors")
+button_group = False
+if st.sidebar.button("2025 Q2", width="stretch"):
+    button_group = True
+    min_date = '2025-04-01'
+    max_date = '2025-06-30'
+if st.sidebar.button("2025 Q3", width="stretch"):
+    button_group = True
+    min_date = '2025-07-01'
+    max_date = '2025-09-30'
+if st.sidebar.button("2025 Q4", width="stretch"):
+    min_date = '2025-10-01'
+    max_date = '2025-12-31'
+    button_group = True
+if st.sidebar.button("YTD", width="stretch"):
+    button_group = True
+    min_date = '2025-01-01'
+    max_date = '2025-12-31'
+if st.sidebar.button("Last Week", width="stretch"):
+    button_group = True
+    min_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    max_date = datetime.now().strftime('%Y-%m-%d')
+
+
+input_date = st.sidebar.date_input(label='Date Range Selector',
+    value=(data_min_date, data_max_date),
+    min_value=data_min_date,
+    max_value=data_max_date,
+    format="MM/DD/YYYY",
 )
 
-slider_start = date_range[0].strftime('%Y-%m-%d')
-slider_end = date_range[1].strftime('%Y-%m-%d')
+if button_group:
+    df = df[df['originalTimestamp'] >= min_date]
+    df = df[df['originalTimestamp'] <= max_date]
+else:
+    start_date = input_date[0].strftime('%Y-%m-%d')
+    end_date = input_date[1].strftime('%Y-%m-%d')
 
-df = df[df['originalTimestamp'] >= slider_start]
-df = df[df['originalTimestamp'] <= slider_end]
+    df = df[df['originalTimestamp'] >= start_date]
+    df = df[df['originalTimestamp'] <= end_date]
 
 
-num_clusters = st.sidebar.slider('Number of Clusters', min_value=2, max_value=10, value=7)
+st.sidebar.header('Data Aggregation Level')
+agg_type_options = ['day', 'week', 'month']
+agg_type = st.sidebar.segmented_control('Aggregation Options', agg_type_options, 
+selection_mode="single", default='day')
+if agg_type == 'day':
+    chart_title = 'Daily'
+if agg_type == 'week':
+    chart_title = 'Weekly'
+if agg_type == 'month':
+    chart_title = 'Monthly'
+
+#num_clusters = st.sidebar.slider('Number of Clusters', min_value=2, max_value=10, value=7)
 
 
 
 
 # data processing
-query = """
+query = f"""
 with base as (
     SELECT 
-        TRY_CAST(strptime("Subscription Renew Date", '%b %d, %Y %I:%M %p') AS DATE) AS renew_date,
-        "Subscription Plan" as subscription_plan,
-        count(distinct "unique id") as num_customers
+        TRY_CAST(strptime(renew_date, '%b %d, %Y %I:%M %p') AS DATE) AS renew_date,
+        subscription_plan,
+        userId
     FROM bill_df
-    GROUP BY 1, 2
-    ORDER BY 1, 2
+)
+
+, agg as (
+    select DATE_TRUNC('{agg_type}', renew_date) as the_date,
+    subscription_plan, 
+    count(distinct userId) as num_customers
+    from base
+    group by 1, 2
 )
 
 select *,
 case when subscription_plan = 'monthly' then num_customers*20 else num_customers*200 end as revenue
-from base
+from agg
 """
 rev_calc = duckdb.sql(query).df()
 
 query = """
-select renew_date,
+select the_date,
 sum(revenue) as estimated_revenue
 from rev_calc
+where the_date is not null
 group by 1
 order by 1
 """
 sub_date = duckdb.sql(query).df()
 
 
-query = """
+query = f"""
 with base as (
-    SELECT DATE(originalTimestamp) as the_date, COALESCE(userId, anonymousId) as user_id
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, COALESCE(userId, anonymousId) as user_id
     FROM df 
 )
 
-select the_date, count(distinct user_id) as dau 
+select the_date, count(distinct user_id) as active_users 
 from base
-where the_date between '{}' and '{}'
 group by the_date
 order by the_date
-""".format(slider_start, slider_end)
-dau = duckdb.sql(query).df()
-
-query = """
-with base as (
-    SELECT DATE_TRUNC('month', DATE(originalTimestamp)) as month_year, 
-           COALESCE(userId, anonymousId) as user_id
-    FROM df 
-)
-
-select month_year, count(distinct user_id) as monthly_active_users
-from base
-group by month_year
-order by month_year
-"""
-mau = duckdb.sql(query).df()
+""".format(agg_type=agg_type)
+active_users = duckdb.sql(query).df()
 
 
-query = """
-SELECT DATE(originalTimestamp) as the_date, count(distinct messageId) as page_views
+query = f"""
+SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, count(distinct messageId) as page_views
 FROM df 
 WHERE event_type = 'page'
-GROUP BY DATE(originalTimestamp)
+GROUP BY DATE_TRUNC('{agg_type}', DATE(originalTimestamp))
 """
 pvs = duckdb.sql(query).df()
 
-query = """
+query = f"""
 with base as (
-    SELECT DATE(originalTimestamp) as the_date, 
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, 
            COALESCE(userId, anonymousId) as user_id,
            COUNT(DISTINCT messageId) as user_page_views
     FROM df 
     WHERE event_type = 'page'
-    GROUP BY DATE(originalTimestamp), COALESCE(userId, anonymousId)
+    GROUP BY DATE_TRUNC('{agg_type}', DATE(originalTimestamp)), COALESCE(userId, anonymousId)
 )
 
 SELECT the_date, AVG(user_page_views) as avg_page_views_per_user
@@ -167,9 +205,9 @@ ORDER BY count DESC
 """
 platform_mobile = duckdb.sql(query).df()
 
-query = """
+query = f"""
 with impressions as (
-    SELECT date(originalTimestamp) as the_date, 
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, 
     COALESCE(userId, anonymousId) as user_id, 
     unnest(string_split(business_id, ', ')) as single_business_id
     FROM df
@@ -191,9 +229,9 @@ order by the_date
 """
 search_results = duckdb.sql(query).df()
 
-query = """
+query = f"""
 with impressions as (
-    SELECT date(originalTimestamp) as the_date, 
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, 
     COALESCE(userId, anonymousId) as user_id, 
     sponsored_listing,
     unnest(string_split(business_id, ', ')) as single_business_id
@@ -215,9 +253,9 @@ order by the_date, sponsored_listing
 """
 impressions = duckdb.sql(query).df()
 
-query = """
+query = f"""
 with t1 as (
-    SELECT date(originalTimestamp) as the_date, business_id, count(distinct messageId) as page_views
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, business_id, count(distinct messageId) as page_views
     FROM df 
     WHERE event_type = 'page'
     and business_id is not null
@@ -231,13 +269,13 @@ order by the_date
 """
 page_views_per_business = duckdb.sql(query).df()
 
-query = """
+query = f"""
 with t1 as (
-    SELECT date(originalTimestamp) as the_date, business_id, count(distinct messageId) as button_clicks
+    SELECT DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, business_id, count(distinct messageId) as button_clicks
     FROM df 
     WHERE event_type = 'button_click'
     and button_name = 'visit_website'
-    group by date(originalTimestamp), business_id
+    group by DATE_TRUNC('{agg_type}', DATE(originalTimestamp)), business_id
 )
 
 select the_date, avg(button_clicks) as avg_button_clicks
@@ -248,20 +286,33 @@ order by the_date
 button_clicks = duckdb.sql(query).df()
 
 
-query = """
-select DATE_TRUNC('month', DATE(originalTimestamp)) as month_year, count(distinct userId) as signups
-from df
-where event_type = 'button_click'
-and button_name = 'faith'
-group by DATE_TRUNC('month', DATE(originalTimestamp))
-order by month_year
+
+query = f"""
+with extra as (
+    select null as the_date, null as subscription_plan, 31 as signups
+)
+
+, base as (
+    select DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date, subscription_plan, count(distinct business_id) as signups
+    from df
+    where event_type = 'button_click'
+    and button_name = 'faith'
+    group by DATE_TRUNC('{agg_type}', DATE(originalTimestamp)), subscription_plan
+)
+
+select * 
+from base
+union all
+select *
+from extra
 """
 signups = duckdb.sql(query).df()
 
-query = """
+
+query = f"""
 WITH page_sequence AS (
     SELECT 
-        DATE_TRUNC('week', DATE(originalTimestamp)) as the_week,
+        DATE_TRUNC('{agg_type}', DATE(originalTimestamp)) as the_date,
         COALESCE(userId, anonymousId) as user_id,
         name as current_page,
         LEAD(name) OVER (
@@ -275,180 +326,190 @@ WITH page_sequence AS (
 ),
 user_weekly_views AS (
     SELECT 
-        the_week,
+        the_date,
         user_id,
         COUNT(CASE WHEN current_page = 'search' THEN 1 END) as user_search_views,
         COUNT(CASE WHEN current_page = 'business_profile' THEN 1 END) as user_profile_views,
         COUNT(CASE WHEN current_page = 'search' AND next_page = 'business_profile' THEN 1 END)::FLOAT / 
             NULLIF(COUNT(CASE WHEN current_page = 'search' THEN 1 END), 0) as user_ctr
     FROM page_sequence
-    GROUP BY the_week, user_id
+    GROUP BY the_date, user_id
 )
 SELECT 
-    the_week as the_date,
+    the_date,
     AVG(user_search_views) as search_views,
     AVG(user_profile_views) as profile_views,
     AVG(user_ctr) as click_through_rate
 FROM user_weekly_views
-GROUP BY the_week
-ORDER BY the_week
+GROUP BY the_date
+ORDER BY the_date
 """
 ctr = duckdb.sql(query).df()
 
 
 
 
-query = """
-SELECT lower(search_text) as search_text
-FROM df
-WHERE event_type = 'search'
-and search_text is not null
-"""
-search_counts = duckdb.sql(query).df()
+# query = """
+# SELECT lower(search_text) as search_text
+# FROM df
+# WHERE event_type = 'search'
+# and search_text is not null
+# """
+# search_counts = duckdb.sql(query).df()
 
-TEXT_COL = 'search_text'
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-embeddings = model.encode(
-    search_counts[TEXT_COL].tolist(),
-    batch_size=64,
-    show_progress_bar=True,
-    convert_to_numpy=True,
-    normalize_embeddings=True
-)
+# TEXT_COL = 'search_text'
+# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+# embeddings = model.encode(
+#     search_counts[TEXT_COL].tolist(),
+#     batch_size=64,
+#     show_progress_bar=True,
+#     convert_to_numpy=True,
+#     normalize_embeddings=True
+# )
 
-km = KMeans(n_clusters=num_clusters, random_state=42, n_init='auto')
-km_labels = km.fit_predict(embeddings)
-search_counts['kmeans_label']   = km_labels
+# km = KMeans(n_clusters=num_clusters, random_state=42, n_init='auto')
+# km_labels = km.fit_predict(embeddings)
+# search_counts['kmeans_label']   = km_labels
 
-kmeans_counts = search_counts.groupby(['kmeans_label', 'search_text']).size().reset_index(name='count')
-kmeans_counts = kmeans_counts.sort_values(['kmeans_label', 'count'], ascending=[True, False])
+# kmeans_counts = search_counts.groupby(['kmeans_label', 'search_text']).size().reset_index(name='count')
+# kmeans_counts = kmeans_counts.sort_values(['kmeans_label', 'count'], ascending=[True, False])
 
-MODEL = "gpt-5-mini"
-client = OpenAI()
+# MODEL = "gpt-5-mini"
+# client = OpenAI()
 
-# Helper: ensure prompt stays in model’s token limit
-enc = tiktoken.encoding_for_model(MODEL)
-def too_long(rows, max_tokens=4000):
-    prompt = ' '.join(rows)
-    return (len(enc.encode(prompt)) + 30) > max_tokens
+# # Helper: ensure prompt stays in model’s token limit
+# enc = tiktoken.encoding_for_model(MODEL)
+# def too_long(rows, max_tokens=4000):
+#     prompt = ' '.join(rows)
+#     return (len(enc.encode(prompt)) + 30) > max_tokens
 
-def get_cluster_name(rows):
-    if too_long(rows):
-        prompt_rows = rows[:20] + rows[-20:]
-    else:
-        prompt_rows = rows
+# def get_cluster_name(rows):
+#     if too_long(rows):
+#         prompt_rows = rows[:20] + rows[-20:]
+#     else:
+#         prompt_rows = rows
 
-    user_prompt = f"""Given this data {str(prompt_rows)},
-    what is a good one or two word category for a search term scatter plot to understand what users on a business directory are searching for.
-    Only return the category name."""
+#     user_prompt = f"""Given this data {str(prompt_rows)},
+#     what is a good one or two word category for a search term scatter plot to understand what users on a business directory are searching for.
+#     Only return the category name."""
     
-    response = client.responses.create(
-        model=MODEL,
-        instructions="You are a coding assistant that only gives one or two word answers.",
-        input=user_prompt
-    )
+#     response = client.responses.create(
+#         model=MODEL,
+#         instructions="You are a coding assistant that only gives one or two word answers.",
+#         input=user_prompt
+#     )
 
-    return response.output_text
+#     return response.output_text
 
-# Get AI-generated names for each cluster
-kmeans_ai_names = {}
+# # Get AI-generated names for each cluster
+# kmeans_ai_names = {}
 
-# Get KMeans cluster names
-for label in kmeans_counts['kmeans_label'].unique():
-    if label == -1:  # Skip noise cluster if present
-        continue
-    cluster_searches = kmeans_counts[kmeans_counts['kmeans_label'] == label]['search_text'].tolist()
-    kmeans_ai_names[label] = get_cluster_name(cluster_searches)
+# # Get KMeans cluster names
+# for label in kmeans_counts['kmeans_label'].unique():
+#     if label == -1:  # Skip noise cluster if present
+#         continue
+#     cluster_searches = kmeans_counts[kmeans_counts['kmeans_label'] == label]['search_text'].tolist()
+#     kmeans_ai_names[label] = get_cluster_name(cluster_searches)
 
 
-# Map AI names back to main dataframe
-search_counts['kmeans_name'] = search_counts['kmeans_label'].map(kmeans_ai_names).fillna('Noise')
+# # Map AI names back to main dataframe
+# search_counts['kmeans_name'] = search_counts['kmeans_label'].map(kmeans_ai_names).fillna('Noise')
 
-# reduce dimensionality
-reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric='cosine', random_state=42)
-proj = reducer.fit_transform(embeddings)
-search_counts['x'], search_counts['y'] = proj[:,0], proj[:,1]
+# # reduce dimensionality
+# reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric='cosine', random_state=42)
+# proj = reducer.fit_transform(embeddings)
+# search_counts['x'], search_counts['y'] = proj[:,0], proj[:,1]
 
 
 
 # display data
 st.title('Colorado Catholic Business Directory')
-st.write('Data from {} to {}'.format(slider_start, slider_end))
-
 
 st.divider()
-st.header('High Level Metrics')
+st.header('User Behavior') 
 with st.container():
-    st.subheader('Daily Active Users')
-    st.line_chart(dau, x='the_date', y='dau', x_label='Date', y_label='DAU')
-
-with st.container():
-    st.subheader('Monthly Active Users')
-    st.line_chart(mau, x='month_year', y='monthly_active_users', x_label='Month', y_label='MAU')
-
-with st.container():
-    st.subheader('Page Views')
-    st.line_chart(pvs, x='the_date', y='page_views', x_label='Date', y_label='Page Views')
+    total, chart = st.columns(spec=[.2, .8])
+    total.metric(label=f'Total Signups', value=signups['signups'].sum())
+    total.metric(label=f'Total Non-Paid Signups', value=signups[signups['subscription_plan'].isna()]['signups'].sum())
+    total.metric(label=f'Total Monthly Signups', value=signups[signups['subscription_plan'] == 'monthly']['signups'].sum())
+    total.metric(label=f'Total Yearly Signups', value=signups[signups['subscription_plan'] == 'yearly']['signups'].sum())
+    chart.subheader(f'{chart_title} Signups')
+    chart.bar_chart(signups, x='the_date', y='signups', x_label='Date', y_label='Signups', color='subscription_plan')
 
 with st.container():
-    st.subheader('Average Page Views per User')
-    st.line_chart(page_views_per_user, x='the_date', y='avg_page_views_per_user', x_label='Date', y_label='Page Views per User')
-
-
-
-st.divider()
-st.header('User Referrers and Platforms')
-col1, col2 = st.columns(2)
-with st.container():
-    col1.subheader('Referrers')
-    col1.bar_chart(referrers, x='referrer', y='count', x_label='Referrer', y_label='Count', horizontal=True, use_container_width=True)
+    total, chart = st.columns(spec=[.2, .8])
+    total.metric(label=f'Total Active Users', value=active_users['active_users'].sum())
+    chart.subheader(f'{chart_title} Active Users')
+    chart.line_chart(active_users, x='the_date', y='active_users', x_label='Date', y_label='Active Users')
 
 with st.container():
-    col2.subheader('Platforms')
-    col2.bar_chart(platform_mobile, x='platform', y='count', x_label='Platform', y_label='Count', horizontal=True, use_container_width=True)
-
-
-st.divider()
-st.header('User Behavior')
-with st.container():
-    st.subheader('Average Number of Impressions per Business')
-    st.line_chart(impressions, x='the_date', y='avg_impressions', color='sponsored_listing', x_label='Date', y_label='Average Number of Impressions per Business')
+    total, chart = st.columns(spec=[.2, .8])
+    total.metric(label=f'Total Page Views', value=pvs['page_views'].sum())
+    chart.subheader(f'{chart_title} Page Views')
+    chart.line_chart(pvs, x='the_date', y='page_views', x_label='Date', y_label='Page Views')
 
 with st.container():
-    st.subheader('Average Number of Page Views per Business')
-    st.line_chart(page_views_per_business, x='the_date', y='avg_page_views', x_label='Date', y_label='Average Number of Page Views per Business')
-
-with st.container():
-    st.subheader('Average Number of Visit Website Button Clicks per Business')
-    st.line_chart(button_clicks, x='the_date', y='avg_button_clicks', x_label='Date', y_label='Average Number of Visit Website Button Clicks per Business')
-
-with st.container():
-    st.subheader('Daily Signups')
-    st.line_chart(signups, x='month_year', y='signups', x_label='Month', y_label='Signups')
-
-with st.container():
-    st.subheader('Search to Profile Click Through Rate')
-    st.line_chart(ctr, x='the_date', y='click_through_rate', x_label='Date', y_label='Search to Profile Click Through Rate')
+    total, chart = st.columns(spec=[.2, .8])
+    total.metric(label=f'Average Page Views Users', value=round(page_views_per_user['avg_page_views_per_user'].mean(), 2))
+    chart.subheader(f'{chart_title} Average Page Views per User')
+    chart.line_chart(page_views_per_user, x='the_date', y='avg_page_views_per_user', x_label='Date', y_label='Page Views per User')
 
 
 
+# st.divider()
+# st.header('User Referrers and Platforms')
+# col1, col2 = st.columns(2)
+# with st.container():
+#     col1.subheader('Referrers')
+#     col1.bar_chart(referrers, x='referrer', y='count', x_label='Referrer', y_label='Count', horizontal=True, use_container_width=True)
 
-st.divider()
-st.header('Search Clustering')
-st.write('This is a scatter plot of the search terms and their clusters. The clusters are generated by a KMeans clustering algorithm.')
-st.write('Use the Number of Clusters slider to change the number of clusters.')
-st.scatter_chart(search_counts, x='x', y='y', color='kmeans_name', x_label='UMAP X', y_label='UMAP Y')
+# with st.container():
+#     col2.subheader('Platforms')
+#     col2.bar_chart(platform_mobile, x='platform', y='count', x_label='Platform', y_label='Count', horizontal=True, use_container_width=True)
+
+
+# st.divider()
+# st.header('User Behavior')
+# with st.container():
+#     st.subheader('Average Number of Impressions per Business')
+#     st.line_chart(impressions, x='the_date', y='avg_impressions', color='sponsored_listing', x_label='Date', y_label='Average Number of Impressions per Business')
+
+# with st.container():
+#     st.subheader('Average Number of Page Views per Business')
+#     st.line_chart(page_views_per_business, x='the_date', y='avg_page_views', x_label='Date', y_label='Average Number of Page Views per Business')
+
+# with st.container():
+#     st.subheader('Average Number of Visit Website Button Clicks per Business')
+#     st.line_chart(button_clicks, x='the_date', y='avg_button_clicks', x_label='Date', y_label='Average Number of Visit Website Button Clicks per Business')
+
+# with st.container():
+#     st.subheader('Daily Signups')
+#     st.line_chart(signups, x='month_year', y='signups', x_label='Month', y_label='Signups')
+
+# with st.container():
+#     st.subheader('Search to Profile Click Through Rate')
+#     st.line_chart(ctr, x='the_date', y='click_through_rate', x_label='Date', y_label='Search to Profile Click Through Rate')
+
+
+
+
+# st.divider()
+# st.header('Search Clustering')
+# st.write('This is a scatter plot of the search terms and their clusters. The clusters are generated by a KMeans clustering algorithm.')
+# st.write('Use the Number of Clusters slider to change the number of clusters.')
+# st.scatter_chart(search_counts, x='x', y='y', color='kmeans_name', x_label='UMAP X', y_label='UMAP Y')
 
 st.divider()
 st.header('Revenue Forecast')
-st.bar_chart(rev_calc, x='renew_date', y='num_customers', color='subscription_plan', x_label='Renew Date', y_label='Number of Paid Customers')
+st.bar_chart(rev_calc, x='the_date', y='num_customers', color='subscription_plan', x_label='Renew Date', y_label='Number of Paid Customers')
 
-st.write('This is a bar chart of the estimated revenue by renew date.')
-st.bar_chart(sub_date, x='renew_date', y='estimated_revenue', x_label='Renew Date', y_label='Estimated Revenue')
+total, chart = st.columns(spec=[.2, .8])
+total.metric(label='Total Forecasted Revenue', value=sub_date['estimated_revenue'].sum())
+chart.bar_chart(sub_date, x='the_date', y='estimated_revenue', x_label='Renew Date', y_label='Estimated Revenue')
 
 @st.cache_data
-def convert_for_download(df):
-    return df.to_csv().encode("utf-8")
+def convert_for_download(download_df):
+    return download_df.to_csv().encode("utf-8")
 
 csv = convert_for_download(rev_calc)
 

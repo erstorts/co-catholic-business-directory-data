@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "98b77d469f40b7eb91b6432c2efe47408ff50ccf524ce64186b1ae749caafbf9"
+            "sha256": "5670eca15b8891a2c1eaa7cabe465926fd622ecb37895de510a7f9abd7cfb530"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -60,6 +60,23 @@
             ],
             "markers": "python_version >= '3.9'",
             "version": "==1.9.0"
+        },
+        "boto3": {
+            "hashes": [
+                "sha256:96ee720b52be647d8ef5ba92fccfce6b65d6321769430fe6edd10d57ec43c25b",
+                "sha256:ecc8c99d3cc96716cdfba62d9c9c6ce0eb98d02494a66690bcc2ec181c1ced67"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.9'",
+            "version": "==1.40.52"
+        },
+        "botocore": {
+            "hashes": [
+                "sha256:838697a06c7713df8d39f088105334b4eadcc3d65c7a260bf1a1bd8bf616ce4a",
+                "sha256:b65d970ca4ccd869639332083da17c3a933bcf495120dcc4f5c7723cb3f6216c"
+            ],
+            "markers": "python_version >= '3.9'",
+            "version": "==1.40.52"
         },
         "cachetools": {
             "hashes": [
@@ -425,6 +442,14 @@
             ],
             "markers": "python_version >= '3.9'",
             "version": "==0.10.0"
+        },
+        "jmespath": {
+            "hashes": [
+                "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980",
+                "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe"
+            ],
+            "markers": "python_version >= '3.7'",
+            "version": "==1.0.1"
         },
         "joblib": {
             "hashes": [
@@ -1411,6 +1436,14 @@
             ],
             "markers": "python_version >= '3.9'",
             "version": "==0.27.0"
+        },
+        "s3transfer": {
+            "hashes": [
+                "sha256:ea3b790c7077558ed1f02a3072fb3cb992bbbd253392f4b6e9e8976941c7d456",
+                "sha256:eff12264e7c8b4985074ccce27a3b38a485bb7f7422cc8046fee9be4983e4125"
+            ],
+            "markers": "python_version >= '3.9'",
+            "version": "==0.14.0"
         },
         "safetensors": {
             "hashes": [

@@ -23,6 +23,7 @@ tiktoken = "*"
 python-dotenv = "*"   # rename: package is python-dotenv
 duckdb = "*"
 streamlit = "*"
+boto3 = "*"
 
 [dev-packages]
 ipykernel = "*"
